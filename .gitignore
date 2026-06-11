@@ -1,0 +1,19 @@
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+
+# Others
+downloads/
+logs/
+mapping/
+templates/
+test data/
+venv/
+credentials.json
+token.json
+.env
