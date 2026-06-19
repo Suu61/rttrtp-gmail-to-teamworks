@@ -13,6 +13,7 @@ import subprocess
 import shutil
 import logging
 from email.message import EmailMessage
+import numpy as np
 
 # Define the permissions your app needs
 SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
@@ -82,7 +83,7 @@ def retrieveMedData(service, user_id='me', max_results=5):
     try:
         # Call the Gmail API
         results = service.users().messages().list(
-            userId=user_id, maxResults=max_results, labelIds=['INBOX'], q="[RTT-RTP ra16x2druw] Daily injury cases after:" +str(date.today())).execute()
+            userId=user_id, maxResults=max_results, labelIds=['INBOX'], q="from:sueannetan.ssi@gmail.com subject:[RTT-RTP ra16x2druw] Daily injury cases after:" +str(date.today())).execute()
         messages = results.get('messages', [])
 
         if not messages:
@@ -156,7 +157,7 @@ if not messages:
     sendEmail(subject="Error: Last RTT/RTP received no messages")
 
 else:
-   
+  
     if 'Sport' in messages[0].columns:
         mergedDF = pd.merge(messages[1], messages[0][["PCNO","Sport", "SP Code", "Service Provider"]], on=['PCNO','SP Code'], how="left")
     elif 'Sport' in messages[1].columns:
@@ -164,47 +165,61 @@ else:
     else:
         logging.error("Failed to merge both datasources.")
 
-    finalDf = mergedDF[['Name', 'VisitDate', 'Sport', 'Event Played', 'Service Provider', 'Body Part Affected', 'Injury Diagnosis', 'Position Played', 'Hand/ Leg Dominance']]
-    finalDf = finalDf.rename(columns={
-                            'Event Played': 'New / Subsequent Injury',
-                            'Service Provider': 'Attending Practitioner',
-                            "Position Played": "Traffic Light Status",
-                            "Hand/ Leg Dominance": "Comments",
-                            "VisitDate": "Visit Date"
-    })
-    finalDf['First Name'] = finalDf['Name'].map(mappingDf.set_index('Name')['First Name'])
-    finalDf['Last Name'] = finalDf['Name'].map(mappingDf.set_index('Name')['Last Name'])
-    finalDf['Date'] = pd.to_datetime(date.today()).strftime("%d-%m-%Y")
-    finalDf['Time'] = datetime.now().time()
-    finalDf['Visit Date'] = pd.to_datetime(finalDf['Visit Date']).dt.strftime("%d-%m-%Y")
-    finalDf = finalDf.drop("Name", axis=1)
-    finalDf = finalDf[["First Name", "Last Name", "Date", "Time", "Visit Date", "Sport", "New / Subsequent Injury", "Attending Practitioner", "Body Part Affected", "Injury Diagnosis",	"Traffic Light Status",	"Comments"]]
+    mergedDF = mergedDF.replace(r'^\s*$', np.nan, regex=True)
+    if not mergedDF.empty and not mergedDF.dropna(how="all").empty:
+        finalDf = mergedDF[['Name', 'VisitDate', 'Sport', 'Event Played', 'Service Provider', 'Body Part Affected', 'Injury Diagnosis', 'Position Played', 'Hand/ Leg Dominance']]
+        finalDf = finalDf.rename(columns={
+                                'Event Played': 'New / Subsequent Injury',
+                                'Service Provider': 'Attending Practitioner',
+                                "Position Played": "Traffic Light Status",
+                                "Hand/ Leg Dominance": "Comments",
+                                "VisitDate": "Visit Date"
+        })
+        finalDf['First Name'] = finalDf['Name'].map(mappingDf.set_index('Name')['First Name'])
+        finalDf['Last Name'] = finalDf['Name'].map(mappingDf.set_index('Name')['Last Name'])
+        finalDf['Date'] = pd.to_datetime(date.today()).strftime("%d-%m-%Y")
+        finalDf['Time'] = datetime.now().time()
+        finalDf['Visit Date'] = pd.to_datetime(finalDf['Visit Date']).dt.strftime("%d-%m-%Y")
 
-    #send out email notif to whoever is needed
-    for index, row in finalDf.iterrows():
-        msgString = (
-            "Hi,\nThere has been an updated status for athlete "
-            + row["First Name"] + " " + row["Last Name"] + " of " + row["Sport"]
-            + ".\nNew / Subsequent Injury: " + row["New / Subsequent Injury"] + "\n"
-            + "Traffic Light Status: " + row["Traffic Light Status"] + "\n"
-            + "Injury Diagnosis: " + row["Injury Diagnosis"] + "\n"
-            + "Body Part Affected: " + row["Body Part Affected"] + "\n"
-            + "Comments: " + row["Comments"] + "\n"
-            + "Recorded by " + row["Attending Practitioner"] + " on " + row["Visit Date"]
+        #handle unmapped athletes
+        unmappedAthletes = finalDf[finalDf['First Name'].isna()]
+        logging.warning("Some athletes were unmapped: " +unmappedAthletes['Name'].to_string())
+        sendEmail(subject="RTT/RTP: Some athletes were unmapped", message=unmappedAthletes.to_string())
+
+        finalDf = finalDf.drop("Name", axis=1)
+        finalDf = finalDf[["First Name", "Last Name", "Date", "Time", "Visit Date", "Sport", "New / Subsequent Injury", "Attending Practitioner", "Body Part Affected", "Injury Diagnosis",	"Traffic Light Status",	"Comments"]]
+
+        #drop all unmapped athletes
+        finalDf = finalDf.dropna(subset=['First Name'])
+
+        #send out email notif to whoever is needed
+        for index, row in finalDf.iterrows():
+            msgString = (
+                "Hi,\nThere has been an updated status for athlete "
+                + row["First Name"] + " " + row["Last Name"] + " of " + row["Sport"]
+                + ".\nNew / Subsequent Injury: " + row["New / Subsequent Injury"] + "\n"
+                + "Traffic Light Status: " + row["Traffic Light Status"] + "\n"
+                + "Injury Diagnosis: " + row["Injury Diagnosis"] + "\n"
+                + "Body Part Affected: " + row["Body Part Affected"] + "\n"
+                + "Comments: " + row["Comments"] + "\n"
+                + "Recorded by " + row["Attending Practitioner"] + " on " + row["Visit Date"]
+            )
+            sendEmail(message=msgString, subject="RTT/RTP: Traffic light status changed for athlete")
+
+        os.makedirs("templates", exist_ok=True)
+        finalDf.to_csv(os.path.join("templates", "templates.csv"), index=False)
+
+        result = subprocess.run("npx playwright test --headed --project=chromium --reporter=html --output=logs/"+str(today), shell=True,
+            capture_output=True,
+            text=True
         )
-        sendEmail(message=msgString, subject="RTT/RTP: Traffic light status changed for athlete")
 
-    os.makedirs("templates", exist_ok=True)
-    finalDf.to_csv(os.path.join("templates", "templates.csv"), index=False)
+        if result.returncode == 0:
+            sendEmail(subject="RTT/RTP: Playwright automation passed")
+        else:
+            sendEmail(subject="RTT/RTP: Playwright automation failed")
 
-    result = subprocess.run("npx playwright test --headed --project=chromium --reporter=html --output=logs/"+str(today), shell=True,
-        capture_output=True,
-        text=True
-    )
-
-    if result.returncode == 0:
-        sendEmail(subject="RTT/RTP: Playwright automation passed")
+        shutil.move("playwright-report", os.path.join("logs", today, "playwright-report"))
     else:
-        sendEmail(subject="RTT/RTP: Playwright automation failed")
-
-    shutil.move("playwright-report", os.path.join("logs", today, "playwright-report"))
+        sendEmail("RTT/RTP: No cases today")
+        exit()
