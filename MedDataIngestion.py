@@ -221,5 +221,6 @@ else:
 
         shutil.move("playwright-report", os.path.join("logs", today, "playwright-report"))
     else:
+        logging.info("RTT/RTP: No cases today")
         sendEmail("RTT/RTP: No cases today")
         exit()
