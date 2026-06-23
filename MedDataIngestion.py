@@ -192,6 +192,15 @@ else:
         #drop all unmapped athletes
         finalDf = finalDf.dropna(subset=['First Name'])
 
+        validStatuses = {"Red", "Yellow", "Green"}
+
+        finalDf["Traffic Light Status"] = finalDf["Traffic Light Status"].astype(str).str.strip().str.capitalize()
+
+        finalDf = finalDf[
+            finalDf["Traffic Light Status"]
+            .isin(validStatuses)
+        ]
+
         #send out email notif to whoever is needed
         for index, row in finalDf.iterrows():
             msgString = (

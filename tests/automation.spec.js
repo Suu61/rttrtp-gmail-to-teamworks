@@ -75,5 +75,9 @@ test('test', async ({ page }) => {
   await page.getByRole('combobox').selectOption('Skip sending any performance alerts');
   await page.getByRole('button', { name: 'Import' }).click();
   await page.locator('i').nth(4).click();
-  await page.locator('#logout').click();
+
+  const logoutButton = page.locator('#logout');
+  await expect(logoutButton).toBeVisible();
+  await expect(logoutButton).toBeEnabled();
+  await logoutButton.click();
 });
